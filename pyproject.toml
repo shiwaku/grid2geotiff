@@ -27,6 +27,9 @@ packages = ["src/grid2geotiff"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# tests/ を `tests.conftest` として import するためリポジトリ直下を sys.path に載せる。
+# これがないと `python -m pytest` では通るが `pytest` 直起動で失敗する。
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 90
