@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# 作業用の中間・出力データ
+out/
+work/
+*.vrt
+*.tif.aux.xml
+
+# 参照資料の抽出テキスト
+*.pdf.txt
+maptiles_manual.txt
+data/
+
+# 参考資料（第三者著作物のため同梱しない）
+references/
+森林資源データ解析・管理標準仕様/
+*.pdf
