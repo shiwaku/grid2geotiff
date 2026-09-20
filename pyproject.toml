@@ -1,0 +1,44 @@
+[project]
+name = "grid-geotiff-converter"
+version = "0.1.0"
+description = "航空レーザ計測のグリッドデータ（XYZ座標値テキスト）を GeoTIFF に変換する CLI"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "rasterio>=1.3",
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "click>=8.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+grid2geotiff = "grid2geotiff.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/grid2geotiff"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# tests/ を `tests.conftest` として import するためリポジトリ直下を sys.path に載せる。
+# これがないと `python -m pytest` では通るが `pytest` 直起動で失敗する。
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 90
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "RUF001",  # 全角記号を含む日本語コメントを許容する
+    "RUF002",
+    "RUF003",
+]
