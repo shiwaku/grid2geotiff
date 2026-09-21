@@ -81,7 +81,7 @@ def _report(results: list[ConvertResult], *, verb: str) -> int:
                 f"  OK   {r.source.name}  {r.width}x{r.height} @ {r.res_x:g}m  "
                 f"点 {r.points:,}  欠損 {r.filled:,} ({ratio:.2f}%)"
                 + (
-                    f"  CRS {r.crs}（図郭番号から推定）"
+                    f"  CRS {r.crs}（1/{r.zukaku_level} 図郭番号から推定）"
                     if r.crs_inferred and r.output
                     else ""
                 )

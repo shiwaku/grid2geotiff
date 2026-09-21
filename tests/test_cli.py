@@ -69,8 +69,9 @@ def test_図郭番号のファイル名ならcrsを省略できる(tmp_path, xyz
     assert result.exit_code == 0, result.output
     with rasterio.open(out / f"{src.stem}.tif") as ds:
         assert ds.crs.to_epsg() == 6676
-    # 黙って推測せず、判定した CRS を必ず出す。
+    # 黙って推測せず、判定した CRS とレベルを必ず出す。
     assert "EPSG:6676" in result.output
+    assert "1/500 図郭番号から推定" in result.output
 
 
 def test_datumでEPSGが変わる(tmp_path, xyz_file):
