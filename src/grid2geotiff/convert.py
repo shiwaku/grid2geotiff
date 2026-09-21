@@ -50,6 +50,8 @@ class ConvertResult:
     crs: str = ""
     #: CRS をファイル名の図郭番号から判定した（＝利用者が明示していない）。
     crs_inferred: bool = False
+    #: 判定に使った図郭の地図情報レベル（5000 / 2500 / 1000 / 500）。
+    zukaku_level: int = 0
 
     @property
     def cells(self) -> int:
@@ -60,16 +62,20 @@ class CrsResolveError(ValueError):
     """CRS を決められない。"""
 
 
-def _resolve_crs(path: Path, spec: GridSpec, opts: ConvertOptions) -> tuple[str, bool]:
-    """使う CRS と、それを図郭番号から判定したかどうかを返す。
+def _resolve_crs(
+    path: Path, spec: GridSpec, opts: ConvertOptions
+) -> tuple[str, bool, int]:
+    """使う CRS、図郭番号から判定したか、判定に使った図郭のレベルを返す。
 
     `--crs` が明示されていればそれを優先する。判定に頼る場合は、図郭番号から
     計算した範囲に実際の座標が収まることを確かめてから採用する。これは名前の形が
     たまたま図郭番号に一致しただけのファイルを弾くための検算で、系番号そのものは
     検証できない（図郭の範囲は各系の原点からの相対位置なので系によらず同じ）。
+
+    1/1000 と 1/500 は名前の形が同じなので、座標が収まる方を選ぶ。
     """
     if opts.crs is not None:
-        return opts.crs, False
+        return opts.crs, False, 0
 
     try:
         zukaku = parse_zukaku(path.stem)
@@ -87,16 +93,20 @@ def _resolve_crs(path: Path, spec: GridSpec, opts: ConvertOptions) -> tuple[str,
         spec.xmax + spec.res_x / 2,
         spec.ymax + spec.res_y / 2,
     )
-    if not zukaku.contains(extent, slack=max(spec.res_x, spec.res_y)):
-        bxmin, bymin, bxmax, bymax = zukaku.extent
+    figure = zukaku.match(extent, slack=max(spec.res_x, spec.res_y))
+    if figure is None:
+        candidates = "、".join(
+            f"1/{f.level} は X {f.check_extent[0]:.2f}..{f.check_extent[2]:.2f} "
+            f"Y {f.check_extent[1]:.2f}..{f.check_extent[3]:.2f}"
+            for f in zukaku.candidates
+        )
         raise CrsResolveError(
             f"図郭番号 {zukaku.code} から {crs} と判定したが、座標範囲 "
-            f"X {extent[0]:.2f}..{extent[2]:.2f} Y {extent[1]:.2f}..{extent[3]:.2f} が "
-            f"1/{zukaku.level} 図郭の範囲 "
-            f"X {bxmin:.2f}..{bxmax:.2f} Y {bymin:.2f}..{bymax:.2f} に収まらない。"
+            f"X {extent[0]:.2f}..{extent[2]:.2f} Y {extent[1]:.2f}..{extent[3]:.2f} が"
+            f"図郭の範囲に収まらない（{candidates}）。"
             f"ファイル名が図郭番号でない可能性がある。--crs で明示すること"
         )
-    return crs, True
+    return crs, True, figure.level
 
 
 def convert_file(path: Path, opts: ConvertOptions) -> ConvertResult:
@@ -127,7 +137,7 @@ def convert_file(path: Path, opts: ConvertOptions) -> ConvertResult:
         return ConvertResult(path, None, False, str(exc), points=len(data))
 
     try:
-        crs, crs_inferred = _resolve_crs(path, spec, opts)
+        crs, crs_inferred, level = _resolve_crs(path, spec, opts)
     except CrsResolveError as exc:
         return ConvertResult(path, None, False, str(exc), points=len(data))
 
@@ -158,6 +168,7 @@ def convert_file(path: Path, opts: ConvertOptions) -> ConvertResult:
         filled=spec.width * spec.height - len(data),
         crs=crs,
         crs_inferred=crs_inferred,
+        zukaku_level=level,
     )
 
 
@@ -183,10 +194,13 @@ def inspect_file(path: Path, opts: ConvertOptions) -> ConvertResult:
 
     # 点検では CRS を決められなくても失敗にせず、理由を添えて報告する。
     try:
-        crs, crs_inferred = _resolve_crs(path, spec, opts)
-        crs_note = f"CRS {crs}" + ("（図郭番号から推定）" if crs_inferred else "")
+        crs, crs_inferred, level = _resolve_crs(path, spec, opts)
+        crs_note = f"CRS {crs}" + (
+            f"（1/{level} 図郭番号から推定）" if crs_inferred else ""
+        )
     except CrsResolveError as exc:
-        crs, crs_inferred, crs_note = "", False, f"CRS 不明（{exc}）"
+        crs, crs_inferred, level = "", False, 0
+        crs_note = f"CRS 不明（{exc}）"
 
     return ConvertResult(
         source=path,
@@ -205,4 +219,5 @@ def inspect_file(path: Path, opts: ConvertOptions) -> ConvertResult:
         filled=spec.width * spec.height - len(data),
         crs=crs,
         crs_inferred=crs_inferred,
+        zukaku_level=level,
     )
