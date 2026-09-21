@@ -62,8 +62,61 @@ def test_不規則点群は終了コード1で失敗する(tmp_path, grid_points
     assert result.exit_code == 1
 
 
-def test_crsは必須(tmp_path, xyz_file):
-    src = xyz_file()
+def test_図郭番号のファイル名ならcrsを省略できる(tmp_path, xyz_file):
+    src = xyz_file(drop=0)  # 08LE2134 -> 第8系
+    out = tmp_path / "out"
+    result = CliRunner().invoke(main, ["convert", str(src), "-o", str(out)])
+    assert result.exit_code == 0, result.output
+    with rasterio.open(out / f"{src.stem}.tif") as ds:
+        assert ds.crs.to_epsg() == 6676
+    # 黙って推測せず、判定した CRS を必ず出す。
+    assert "EPSG:6676" in result.output
+
+
+def test_datumでEPSGが変わる(tmp_path, xyz_file):
+    src = xyz_file(drop=0)
+    out = tmp_path / "out"
+    result = CliRunner().invoke(
+        main, ["convert", str(src), "-o", str(out), "--datum", "jgd2000"]
+    )
+    assert result.exit_code == 0, result.output
+    with rasterio.open(out / f"{src.stem}.tif") as ds:
+        assert ds.crs.to_epsg() == 2450
+
+
+def test_明示したcrsが図郭番号より優先される(tmp_path, xyz_file):
+    src = xyz_file(drop=0)  # 名前は第8系だが、第9系を明示する
+    out = tmp_path / "out"
+    result = CliRunner().invoke(
+        main, ["convert", str(src), "-o", str(out), "--crs", "EPSG:6677"]
+    )
+    assert result.exit_code == 0, result.output
+    with rasterio.open(out / f"{src.stem}.tif") as ds:
+        assert ds.crs.to_epsg() == 6677
+
+
+def test_図郭番号でない名前はcrsが必要(tmp_path, xyz_file):
+    src = xyz_file(drop=0, name="dsm_area1.txt")
     result = CliRunner().invoke(main, ["convert", str(src), "-o", str(tmp_path / "o")])
-    assert result.exit_code != 0
+    assert result.exit_code == 1
     assert "--crs" in result.output
+
+    ok = CliRunner().invoke(
+        main, ["convert", str(src), "-o", str(tmp_path / "o"), "--crs", "EPSG:6676"]
+    )
+    assert ok.exit_code == 0, ok.output
+
+
+def test_座標範囲と矛盾する図郭番号は採用しない(tmp_path, xyz_file):
+    """名前は 08AA（原点の北西端）だが、座標は 08LE のもの。"""
+    src = xyz_file(drop=0, name="08AA0000.txt")
+    result = CliRunner().invoke(main, ["convert", str(src), "-o", str(tmp_path / "o")])
+    assert result.exit_code == 1
+    assert "収まらない" in result.output
+
+
+def test_inspectも判定したcrsを表示する(tmp_path, xyz_file):
+    src = xyz_file(drop=0)
+    result = CliRunner().invoke(main, ["inspect", str(src)])
+    assert result.exit_code == 0, result.output
+    assert "EPSG:6676" in result.output

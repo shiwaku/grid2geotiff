@@ -80,6 +80,11 @@ def _report(results: list[ConvertResult], *, verb: str) -> int:
             click.echo(
                 f"  OK   {r.source.name}  {r.width}x{r.height} @ {r.res_x:g}m  "
                 f"点 {r.points:,}  欠損 {r.filled:,} ({ratio:.2f}%)"
+                + (
+                    f"  CRS {r.crs}（図郭番号から推定）"
+                    if r.crs_inferred and r.output
+                    else ""
+                )
                 + (f"  -> {r.output.name}" if r.output else f"  {r.message}")
             )
         else:
@@ -90,6 +95,21 @@ def _report(results: list[ConvertResult], *, verb: str) -> int:
 
 
 _common_options = [
+    click.option(
+        "--crs",
+        default=None,
+        help=(
+            "入力座標の参照系（例 EPSG:6676 = JGD2011 平面直角座標系第8系）。"
+            "省略時はファイル名の図郭番号から判定する。"
+        ),
+    ),
+    click.option(
+        "--datum",
+        type=click.Choice(["jgd2011", "jgd2000"]),
+        default="jgd2011",
+        show_default=True,
+        help="図郭番号から CRS を判定するときの測地系。",
+    ),
     click.option(
         "--res",
         default=None,
@@ -150,11 +170,6 @@ def main() -> None:
     type=click.Path(file_okay=False),
     help="GeoTIFF の出力先ディレクトリ。",
 )
-@click.option(
-    "--crs",
-    required=True,
-    help="入力座標の参照系（例 EPSG:6676 = JGD2011 平面直角座標系第8系）。",
-)
 @click.option("--nodata", default=-9999.0, show_default=True, help="出力の NoData 値。")
 @click.option(
     "--dtype",
@@ -176,7 +191,7 @@ def main() -> None:
 @click.option("--overwrite", is_flag=True, help="既存の出力を上書きする。")
 @_add_options(_common_options)
 def convert(
-    inputs, out_dir, crs, nodata, dtype, compress, blocksize, overwrite, **common
+    inputs, out_dir, nodata, dtype, compress, blocksize, overwrite, **common
 ) -> None:
     """XYZ テキストを GeoTIFF に変換する。
 
@@ -187,7 +202,7 @@ def convert(
         raise click.ClickException("入力ファイルが見つからない")
 
     opts = ConvertOptions(
-        crs=crs,
+        crs=common["crs"],
         out_dir=Path(out_dir),
         res=_parse_res(common["res"]),
         nodata=nodata,
@@ -199,9 +214,15 @@ def convert(
         input_nodata=tuple(common["input_nodata"]),
         tolerance_ratio=common["tolerance_ratio"],
         overwrite=overwrite,
+        datum=common["datum"],
     )
 
-    click.echo(f"変換 {len(files)} ファイル -> {out_dir}  (CRS {crs})")
+    crs_note = (
+        f"CRS {common['crs']}"
+        if common["crs"]
+        else f"CRS は図郭番号から判定 / {common['datum'].upper()}"
+    )
+    click.echo(f"変換 {len(files)} ファイル -> {out_dir}  ({crs_note})")
     results = _run(convert_file, files, opts, common["jobs"])
     sys.exit(_report(results, verb="変換"))
 
@@ -219,13 +240,14 @@ def inspect(inputs, **common) -> None:
         raise click.ClickException("入力ファイルが見つからない")
 
     opts = ConvertOptions(
-        crs="EPSG:4326",  # 点検では使わない
-        out_dir=Path("."),
+        crs=common["crs"],
+        out_dir=Path("."),  # 点検では使わない
         res=_parse_res(common["res"]),
         delimiter=common["delimiter"],
         columns=_parse_columns(common["columns"]),
         input_nodata=tuple(common["input_nodata"]),
         tolerance_ratio=common["tolerance_ratio"],
+        datum=common["datum"],
     )
 
     click.echo(f"点検 {len(files)} ファイル")

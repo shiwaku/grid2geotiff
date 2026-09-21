@@ -5,16 +5,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from grid2geotiff.gridspec import NotAGridError, infer_grid, rasterize
+from grid2geotiff.gridspec import GridSpec, NotAGridError, infer_grid, rasterize
 from grid2geotiff.writer import write_geotiff
 from grid2geotiff.xyz import XyzReadError, read_xyz
+from grid2geotiff.zukaku import ZukakuError
+from grid2geotiff.zukaku import parse as parse_zukaku
 
 
 @dataclass(frozen=True)
 class ConvertOptions:
     """変換の設定。プロセス間で渡すので dataclass にしておく。"""
 
-    crs: str
+    #: 入力座標の参照系。None ならファイル名の図郭番号から判定する。
+    crs: str | None
     out_dir: Path
     res: tuple[float, float] | None = None
     nodata: float = -9999.0
@@ -26,6 +29,8 @@ class ConvertOptions:
     input_nodata: tuple[float, ...] = ()
     tolerance_ratio: float = 0.01
     overwrite: bool = False
+    #: 図郭番号から CRS を判定するときの測地系。
+    datum: str = "jgd2011"
 
 
 @dataclass(frozen=True)
@@ -42,10 +47,56 @@ class ConvertResult:
     res_x: float = 0.0
     res_y: float = 0.0
     filled: int = 0
+    crs: str = ""
+    #: CRS をファイル名の図郭番号から判定した（＝利用者が明示していない）。
+    crs_inferred: bool = False
 
     @property
     def cells(self) -> int:
         return self.width * self.height
+
+
+class CrsResolveError(ValueError):
+    """CRS を決められない。"""
+
+
+def _resolve_crs(path: Path, spec: GridSpec, opts: ConvertOptions) -> tuple[str, bool]:
+    """使う CRS と、それを図郭番号から判定したかどうかを返す。
+
+    `--crs` が明示されていればそれを優先する。判定に頼る場合は、図郭番号から
+    計算した範囲に実際の座標が収まることを確かめてから採用する。これは名前の形が
+    たまたま図郭番号に一致しただけのファイルを弾くための検算で、系番号そのものは
+    検証できない（図郭の範囲は各系の原点からの相対位置なので系によらず同じ）。
+    """
+    if opts.crs is not None:
+        return opts.crs, False
+
+    try:
+        zukaku = parse_zukaku(path.stem)
+    except ZukakuError as exc:
+        raise CrsResolveError(
+            f"ファイル名から CRS を判定できない（{exc}）。--crs で明示すること"
+        ) from None
+
+    crs = zukaku.epsg(opts.datum)
+
+    # セル中心ではなく外接矩形で比べる。図郭の範囲とは本来ぴったり一致する。
+    extent = (
+        spec.xmin - spec.res_x / 2,
+        spec.ymin - spec.res_y / 2,
+        spec.xmax + spec.res_x / 2,
+        spec.ymax + spec.res_y / 2,
+    )
+    if not zukaku.contains(extent, slack=max(spec.res_x, spec.res_y)):
+        bxmin, bymin, bxmax, bymax = zukaku.extent
+        raise CrsResolveError(
+            f"図郭番号 {zukaku.code} から {crs} と判定したが、座標範囲 "
+            f"X {extent[0]:.2f}..{extent[2]:.2f} Y {extent[1]:.2f}..{extent[3]:.2f} が "
+            f"1/{zukaku.level} 図郭の範囲 "
+            f"X {bxmin:.2f}..{bxmax:.2f} Y {bymin:.2f}..{bymax:.2f} に収まらない。"
+            f"ファイル名が図郭番号でない可能性がある。--crs で明示すること"
+        )
+    return crs, True
 
 
 def convert_file(path: Path, opts: ConvertOptions) -> ConvertResult:
@@ -75,13 +126,18 @@ def convert_file(path: Path, opts: ConvertOptions) -> ConvertResult:
     except NotAGridError as exc:
         return ConvertResult(path, None, False, str(exc), points=len(data))
 
+    try:
+        crs, crs_inferred = _resolve_crs(path, spec, opts)
+    except CrsResolveError as exc:
+        return ConvertResult(path, None, False, str(exc), points=len(data))
+
     array = rasterize(data.x, data.y, data.z, spec, nodata=opts.nodata, dtype=opts.dtype)
 
     write_geotiff(
         out_path,
         array,
         spec,
-        opts.crs,
+        crs,
         nodata=opts.nodata,
         compress=opts.compress,
         blocksize=opts.blocksize,
@@ -100,6 +156,8 @@ def convert_file(path: Path, opts: ConvertOptions) -> ConvertResult:
         res_x=spec.res_x,
         res_y=spec.res_y,
         filled=spec.width * spec.height - len(data),
+        crs=crs,
+        crs_inferred=crs_inferred,
     )
 
 
@@ -123,13 +181,21 @@ def inspect_file(path: Path, opts: ConvertOptions) -> ConvertResult:
     except NotAGridError as exc:
         return ConvertResult(path, None, False, str(exc), points=len(data))
 
+    # 点検では CRS を決められなくても失敗にせず、理由を添えて報告する。
+    try:
+        crs, crs_inferred = _resolve_crs(path, spec, opts)
+        crs_note = f"CRS {crs}" + ("（図郭番号から推定）" if crs_inferred else "")
+    except CrsResolveError as exc:
+        crs, crs_inferred, crs_note = "", False, f"CRS 不明（{exc}）"
+
     return ConvertResult(
         source=path,
         output=None,
         ok=True,
         message=(
             f"X {spec.xmin - spec.res_x / 2:.2f}..{spec.xmax + spec.res_x / 2:.2f} "
-            f"Y {spec.ymin - spec.res_y / 2:.2f}..{spec.ymax + spec.res_y / 2:.2f}"
+            f"Y {spec.ymin - spec.res_y / 2:.2f}..{spec.ymax + spec.res_y / 2:.2f}  "
+            f"{crs_note}"
         ),
         points=len(data),
         width=spec.width,
@@ -137,4 +203,6 @@ def inspect_file(path: Path, opts: ConvertOptions) -> ConvertResult:
         res_x=spec.res_x,
         res_y=spec.res_y,
         filled=spec.width * spec.height - len(data),
+        crs=crs,
+        crs_inferred=crs_inferred,
     )
