@@ -85,7 +85,7 @@ def test_不規則点群は変換せず失敗を返す(tmp_path, grid_points, op
     )
     result = convert_file(path, opts)
     assert not result.ok
-    assert "格子に載っていない" in result.message
+    assert "格子が疎すぎる" in result.message
     assert not (opts.out_dir / "scatter.tif").exists()
 
 
