@@ -28,6 +28,8 @@ class ConvertOptions:
     columns: tuple[int, int, int] = (0, 1, 2)
     input_nodata: tuple[float, ...] = ()
     tolerance_ratio: float = 0.01
+    #: セル数に対する点数の下限。下回れば格子とみなさない。
+    min_fill_ratio: float = 0.01
     overwrite: bool = False
     #: 図郭番号から CRS を判定するときの測地系。
     datum: str = "jgd2011"
@@ -131,7 +133,11 @@ def convert_file(path: Path, opts: ConvertOptions) -> ConvertResult:
 
     try:
         spec = infer_grid(
-            data.x, data.y, res=opts.res, tolerance_ratio=opts.tolerance_ratio
+            data.x,
+            data.y,
+            res=opts.res,
+            tolerance_ratio=opts.tolerance_ratio,
+            min_fill_ratio=opts.min_fill_ratio,
         )
     except NotAGridError as exc:
         return ConvertResult(path, None, False, str(exc), points=len(data))
@@ -187,7 +193,11 @@ def inspect_file(path: Path, opts: ConvertOptions) -> ConvertResult:
 
     try:
         spec = infer_grid(
-            data.x, data.y, res=opts.res, tolerance_ratio=opts.tolerance_ratio
+            data.x,
+            data.y,
+            res=opts.res,
+            tolerance_ratio=opts.tolerance_ratio,
+            min_fill_ratio=opts.min_fill_ratio,
         )
     except NotAGridError as exc:
         return ConvertResult(path, None, False, str(exc), points=len(data))

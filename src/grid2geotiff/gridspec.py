@@ -83,6 +83,7 @@ def infer_grid(
     res: tuple[float, float] | None = None,
     decimals: int = 6,
     tolerance_ratio: float = 0.01,
+    min_fill_ratio: float = 0.01,
 ) -> GridSpec:
     """点群から GridSpec を推定し、格子に載っていることを検証する。
 
@@ -91,6 +92,8 @@ def infer_grid(
         res: 格子間隔を明示する場合の (res_x, res_y)。省略時は推定する。
         decimals: 座標の丸め桁数。浮動小数の表記ゆれを吸収する。
         tolerance_ratio: 格子からのずれの許容量を格子間隔に対する比で指定する。
+        min_fill_ratio: セル数に対する点数の下限。下回れば格子とみなさない。
+            0 にすると検定そのものが止まり、巨大な配列の確保を防げなくなる。
 
     Raises:
         NotAGridError: 点が規則格子に載っていないとき。
@@ -109,6 +112,27 @@ def infer_grid(
     xmin, xmax = float(x.min()), float(x.max())
     ymin, ymax = float(y.min()), float(y.max())
 
+    width = round((xmax - xmin) / res_x) + 1
+    height = round((ymax - ymin) / res_y) + 1
+
+    # 格子間隔の推定が外れていないかを、セルの埋まり具合で見る。
+    #
+    # `_infer_step` は差分の最頻値を採るが、不規則点群ではテキストの桁数による
+    # 量子化ステップを拾ってしまう（`%.3f` なら 0.001m）。するとすべての点が
+    # その細かい格子にぴったり載るため、下の残差検定が恒真になって素通りし、
+    # 何十億セルもの空ラスタができる。格子データなら点数とセル数はほぼ一致する
+    # （実測で充填率 98% 以上）ので、桁違いに疎ければ格子ではない。
+    cells = width * height
+    fill = x.size / cells if cells else 0.0
+    if fill < min_fill_ratio:
+        raise NotAGridError(
+            f"格子が疎すぎる（点 {x.size:,} に対して {width:,}x{height:,} = "
+            f"{cells:,} セル、充填率 {fill:.4%} < 許容 {min_fill_ratio:.4%}）。"
+            f"推定した格子間隔 {res_x:.6g} x {res_y:.6g} m が実際の間隔と合っていない。"
+            f"不規則点群ならラスタ化するには内挿補間が必要。格子間隔が分かっているなら "
+            f"--res で指定する（意図的に疎な格子なら --min-fill-ratio で緩める）"
+        )
+
     # 格子からの残差を見て、本当に格子かどうかを判定する。ここを省くと
     # 不規則点群を黙って最近隣で丸め込んでしまう。
     for axis, vals, origin, step in (("X", x, xmin, res_x), ("Y", y, ymin, res_y)):
@@ -123,8 +147,6 @@ def infer_grid(
                 f"不規則点群の可能性が高く、ラスタ化するには内挿補間が必要"
             )
 
-    width = round((xmax - xmin) / res_x) + 1
-    height = round((ymax - ymin) / res_y) + 1
     return GridSpec(
         xmin=xmin, ymin=ymin, res_x=res_x, res_y=res_y, width=width, height=height
     )

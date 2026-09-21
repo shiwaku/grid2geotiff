@@ -138,6 +138,15 @@ _common_options = [
         show_default=True,
         help="格子からのずれの許容量（格子間隔に対する比）。",
     ),
+    click.option(
+        "--min-fill-ratio",
+        default=0.01,
+        show_default=True,
+        help=(
+            "セル数に対する点数の下限。下回れば格子とみなさずエラーにする。"
+            "0 にすると検定そのものを止めるため、巨大な配列の確保を防げなくなる。"
+        ),
+    ),
     click.option("--jobs", "-j", default=1, show_default=True, help="並列処理数。"),
 ]
 
@@ -213,6 +222,7 @@ def convert(
         columns=_parse_columns(common["columns"]),
         input_nodata=tuple(common["input_nodata"]),
         tolerance_ratio=common["tolerance_ratio"],
+        min_fill_ratio=common["min_fill_ratio"],
         overwrite=overwrite,
         datum=common["datum"],
     )
@@ -247,6 +257,7 @@ def inspect(inputs, **common) -> None:
         columns=_parse_columns(common["columns"]),
         input_nodata=tuple(common["input_nodata"]),
         tolerance_ratio=common["tolerance_ratio"],
+        min_fill_ratio=common["min_fill_ratio"],
         datum=common["datum"],
     )
 
