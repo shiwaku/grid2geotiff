@@ -16,7 +16,11 @@ work/
 # 参照資料の抽出テキスト
 *.pdf.txt
 maptiles_manual.txt
-data/
+# 検証用データ。取得したテキスト・ラスタは同梱しないが、
+# 何を使ったかと取得手順は追跡する（testdata/README.md 参照）。
+/testdata/*
+!/testdata/README.md
+!/testdata/urllist-shizuoka-alb.txt
 
 # 参考資料（第三者著作物のため同梱しない）
 references/

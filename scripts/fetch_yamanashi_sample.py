@@ -10,8 +10,9 @@ mapbox-vector-tile が要る（``pip install mapbox-vector-tile``）。
 
 使い方::
 
-    python scripts/fetch_yamanashi_sample.py --out data/raw
-    python scripts/fetch_yamanashi_sample.py --out data/raw --product dsm1 --limit 1
+    python scripts/fetch_yamanashi_sample.py --out testdata/yamanashi-kofu/raw
+    python scripts/fetch_yamanashi_sample.py --out testdata/yamanashi-fujiyoshida/raw \
+        --lat 35.4873 --lon 138.8078 --limit 4
 """
 
 from __future__ import annotations
@@ -89,7 +90,9 @@ def download(entry: dict[str, str], out_dir: Path, *, extract: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", type=Path, default=Path("data/raw"), help="保存先")
+    parser.add_argument(
+        "--out", type=Path, default=Path("testdata/yamanashi-kofu/raw"), help="保存先"
+    )
     parser.add_argument(
         "--product", choices=sorted(PRODUCTS), default="dem", help="取得する製品"
     )
