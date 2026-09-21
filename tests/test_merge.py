@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import pytest
 import rasterio
@@ -211,6 +213,59 @@ def test_vrtだけを出力できる(pair, tmp_path):
     assert 'relativeToVRT="1"' in xml
     with rasterio.open(out) as ds:
         assert (ds.width, ds.height) == (SIZE * 2, SIZE)
+
+
+def test_keep_vrtでGeoTIFFとVRTの両方を出せる(pair, tmp_path):
+    out = tmp_path / "mosaic.tif"
+    result = merge_files(pair, out, keep_vrt=True)
+
+    vrt = tmp_path / "mosaic.vrt"
+    assert result.vrt == vrt
+    assert out.exists() and vrt.exists()
+
+    # 同じ結合を指しているので画素は一致する。
+    with rasterio.open(out) as a, rasterio.open(vrt) as b:
+        assert (a.width, a.height) == (b.width, b.height)
+        np.testing.assert_array_equal(a.read(1), b.read(1))
+
+
+def test_keep_vrtなしならVRTは残らない(pair, tmp_path):
+    result = merge_files(pair, tmp_path / "mosaic.tif")
+    assert result.vrt is None
+    assert list(tmp_path.glob("*.vrt")) == []
+
+
+def test_既存のVRTも上書き確認の対象にする(pair, tmp_path):
+    (tmp_path / "mosaic.vrt").write_text("既存", encoding="utf-8")
+    with pytest.raises(MergeError, match="--overwrite"):
+        merge_files(pair, tmp_path / "mosaic.tif", keep_vrt=True)
+    merge_files(pair, tmp_path / "mosaic.tif", keep_vrt=True, overwrite=True)
+
+
+def test_同じ場所のソースはファイル名だけで書く(pair, tmp_path):
+    """VRT と一緒に持ち運べるように相対パスにする。"""
+    sources = read_sources(pair)
+    xml = build_vrt(sources, (0.0, -10.0, 20.0, 0.0), nodata=NODATA, vrt_dir=tmp_path)
+    assert 'relativeToVRT="1">west.tif<' in xml
+
+
+def test_相対パスを使わないなら絶対パスで書く(pair, tmp_path):
+    sources = read_sources(pair)
+    xml = build_vrt(sources, (0.0, -10.0, 20.0, 0.0), nodata=NODATA, vrt_dir=None)
+    assert 'relativeToVRT="0"' in xml
+    assert 'relativeToVRT="1"' not in xml
+
+
+def test_書き出すパスは絶対パスより長くならない(pair, tmp_path):
+    """共通の親が遠いと `..` が延々と並ぶ。そうなるくらいなら絶対パスのほうがよい。"""
+    sources = read_sources(pair)
+    far = tmp_path / "a" / "b" / "c" / "d" / "e" / "f"
+    far.mkdir(parents=True)
+    xml = build_vrt(sources, (0.0, -10.0, 20.0, 0.0), nodata=NODATA, vrt_dir=far)
+    written = re.findall(r"<SourceFilename[^>]*>([^<]+)<", xml)
+    assert written
+    for name, source in zip(written, sources, strict=True):
+        assert len(name) <= len(str(source.path.resolve()))
 
 
 def test_範囲外の図郭はvrtに載せない(make_tif, tmp_path):

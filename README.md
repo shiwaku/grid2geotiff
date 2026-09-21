@@ -183,9 +183,20 @@ $ grid2geotiff merge testdata/yamanashi-kofu/out -o mosaic.tif
 | `--clip` | なし | 切り出す範囲をベクタファイルの範囲から取る（fiona が要る） |
 | `--min-coverage` | `0.05` | 出力セル数に対する入力の被覆率の下限 |
 | `--vrt-only` | off | GeoTIFF を書かず VRT だけを出力する |
+| `--keep-vrt` | off | GeoTIFF に加えて同じ名前の `.vrt` も残す |
 | `--overwrite` | off | 既存の出力を上書き |
 
 `--vrt-only` で出した VRT は QGIS がそのまま開ける。実体を作らないので一瞬で終わり、容量も食わない。
+
+GeoTIFF と VRT の両方が欲しいときは `--keep-vrt` を使う。**どの図郭をどう並べた結合なのかがファイルとして残る**ので、後から中身を確かめられる。
+
+```console
+$ grid2geotiff merge testdata/yamanashi-kofu/out -o mosaic.tif --keep-vrt
+結合 6 ファイル -> mosaic.tif
+  OK   1,600x1,800 @ 0.5m  被覆率 100.00%  -> mosaic.tif + mosaic.vrt
+```
+
+VRT に書くソースのパスは、相対パスと絶対パスの短いほうを選ぶ。出力をソースと同じ場所に置けばファイル名だけになり、VRT ごと持ち運べる。共通の親が遠くて `..` が延々と並ぶ場合は絶対パスにする。
 
 #### 揃っていない入力は結合しない
 
