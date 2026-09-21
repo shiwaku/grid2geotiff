@@ -10,20 +10,24 @@ import click
 
 from grid2geotiff import __version__
 from grid2geotiff.convert import ConvertOptions, ConvertResult, convert_file, inspect_file
+from grid2geotiff.merge import MergeError, merge_files, read_clip_bounds
 
 #: ZIP も含めて入力として受け付ける拡張子。
 INPUT_SUFFIXES = (".txt", ".csv", ".xyz", ".dat", ".zip")
 
+#: merge の入力として受け付ける拡張子。
+RASTER_SUFFIXES = (".tif", ".tiff")
 
-def _expand_inputs(paths: tuple[str, ...]) -> list[Path]:
+
+def _expand_inputs(
+    paths: tuple[str, ...], suffixes: tuple[str, ...] = INPUT_SUFFIXES
+) -> list[Path]:
     """ディレクトリを展開し、入力ファイルの一覧を作る。"""
     found: list[Path] = []
     for raw in paths:
         p = Path(raw)
         if p.is_dir():
-            found.extend(
-                q for q in sorted(p.rglob("*")) if q.suffix.lower() in INPUT_SUFFIXES
-            )
+            found.extend(q for q in sorted(p.rglob("*")) if q.suffix.lower() in suffixes)
         else:
             found.append(p)
     # 同じ図郭を .txt と .zip の両方で拾わないよう、ステム単位で txt を優先する。
@@ -264,6 +268,123 @@ def inspect(inputs, **common) -> None:
     click.echo(f"点検 {len(files)} ファイル")
     results = _run(inspect_file, files, opts, common["jobs"])
     sys.exit(_report(results, verb="点検"))
+
+
+def _parse_bounds(value: str | None) -> tuple[float, float, float, float] | None:
+    if value is None:
+        return None
+    parts = [v for v in value.replace(" ", "").split(",") if v]
+    if len(parts) != 4:
+        raise click.BadParameter(
+            f"--bounds は xmin,ymin,xmax,ymax の4つを指定する: {value!r}"
+        )
+    xmin, ymin, xmax, ymax = (float(v) for v in parts)
+    if xmin >= xmax or ymin >= ymax:
+        raise click.BadParameter(f"--bounds の順序が不正: {value!r}")
+    return (xmin, ymin, xmax, ymax)
+
+
+@main.command()
+@click.argument("inputs", nargs=-1, required=True, type=click.Path(exists=True))
+@click.option(
+    "--out",
+    "-o",
+    "out_path",
+    required=True,
+    type=click.Path(dir_okay=False),
+    help="結合結果の出力先ファイル。",
+)
+@click.option("--nodata", default=-9999.0, show_default=True, help="出力の NoData 値。")
+@click.option(
+    "--compress",
+    type=click.Choice(["deflate", "lzw", "zstd", "none"]),
+    default="deflate",
+    show_default=True,
+    help="圧縮方式。",
+)
+@click.option(
+    "--blocksize", default=256, show_default=True, help="タイル化のブロックサイズ。"
+)
+@click.option(
+    "--bounds",
+    default=None,
+    help="切り出す範囲 `xmin,ymin,xmax,ymax`。格子に合わせて外側へ丸める。",
+)
+@click.option(
+    "--clip",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="切り出す範囲をベクタファイルの範囲から取る（fiona が必要）。",
+)
+@click.option(
+    "--min-coverage",
+    default=0.05,
+    show_default=True,
+    help="出力セル数に対する入力の被覆率の下限。下回れば結合せずエラーにする。",
+)
+@click.option(
+    "--vrt-only",
+    is_flag=True,
+    help="GeoTIFF を書かず VRT だけを出力する。QGIS はこれを直接開ける。",
+)
+@click.option("--overwrite", is_flag=True, help="既存の出力を上書きする。")
+def merge(
+    inputs,
+    out_path,
+    nodata,
+    compress,
+    blocksize,
+    bounds,
+    clip,
+    min_coverage,
+    vrt_only,
+    overwrite,
+) -> None:
+    """図郭ごとの GeoTIFF を1枚に結合する。
+
+    VRT を介してブロック単位で読み書きするので、出力が何 GB になってもメモリには
+    1ブロック分しか載らない。座標系・格子間隔・データ型・格子の位相が食い違う
+    入力が混ざっていれば、結合せずエラーにする。
+    """
+    files = _expand_inputs(inputs, RASTER_SUFFIXES)
+    if not files:
+        raise click.ClickException("入力ファイルが見つからない")
+
+    try:
+        clip_bounds = _parse_bounds(bounds)
+        if clip is not None:
+            vector_bounds = read_clip_bounds(Path(clip))
+            clip_bounds = (
+                vector_bounds
+                if clip_bounds is None
+                else (
+                    max(clip_bounds[0], vector_bounds[0]),
+                    max(clip_bounds[1], vector_bounds[1]),
+                    min(clip_bounds[2], vector_bounds[2]),
+                    min(clip_bounds[3], vector_bounds[3]),
+                )
+            )
+
+        click.echo(f"結合 {len(files)} ファイル -> {out_path}")
+        result = merge_files(
+            files,
+            Path(out_path),
+            nodata=nodata,
+            compress=compress,
+            blocksize=blocksize,
+            bounds=clip_bounds,
+            min_coverage=min_coverage,
+            overwrite=overwrite,
+            vrt_only=vrt_only,
+        )
+    except MergeError as exc:
+        click.secho(f"  NG   {exc}", fg="red", err=True)
+        sys.exit(1)
+
+    click.echo(
+        f"  OK   {result.width:,}x{result.height:,} @ {result.res_x:g}m  "
+        f"被覆率 {result.coverage:.2%}  -> {result.output.name}"
+    )
 
 
 if __name__ == "__main__":

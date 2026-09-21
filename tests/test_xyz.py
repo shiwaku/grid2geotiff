@@ -74,3 +74,33 @@ def test_全点が欠測値なら拒否する(tmp_path):
     path.write_text("0.25 0.25 -9999\n0.75 0.25 -9999\n")
     with pytest.raises(XyzReadError, match="点が残らない"):
         read_xyz(path, input_nodata=(-9999,))
+
+
+def test_4列以上のファイルから列を選べる(tmp_path):
+    """付帯情報が並ぶ配布形態がある。
+
+    静岡県の ALB グリッドデータは `連番,easting,northing,標高,予備` の5列
+    カンマ区切りで、X/Y/Z は 1,2,3 列目に入っている。列名を自前で作っていると
+    ファイルの列数と合ったときしか読めなかった。
+    """
+    src = tmp_path / "alb.txt"
+    src.write_text(
+        "1,-0.25,-106848.75,-0.10,-9999\r\n"
+        "2,-0.75,-106849.25,-0.20,-9999\r\n"
+        "3,-0.25,-106849.25,-0.30,-9999\r\n"
+    )
+    data = read_xyz(src, columns=(1, 2, 3))
+    assert len(data) == 3
+    np.testing.assert_allclose(data.x, [-0.25, -0.75, -0.25])
+    np.testing.assert_allclose(data.y, [-106848.75, -106849.25, -106849.25])
+    np.testing.assert_allclose(data.z, [-0.10, -0.20, -0.30])
+
+
+def test_列の選び方を変えても読める(tmp_path):
+    """末尾の列を Z にする、順序を入れ替えるといった指定も通す。"""
+    src = tmp_path / "alb.txt"
+    src.write_text("1,10.0,20.0,30.0,40.0\n2,11.0,21.0,31.0,41.0\n")
+    data = read_xyz(src, columns=(2, 1, 4))
+    np.testing.assert_allclose(data.x, [20.0, 21.0])
+    np.testing.assert_allclose(data.y, [10.0, 11.0])
+    np.testing.assert_allclose(data.z, [40.0, 41.0])

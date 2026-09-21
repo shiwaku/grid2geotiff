@@ -2,11 +2,11 @@
 
 航空レーザ計測のグリッドデータ（XYZ座標値テキスト）を GeoTIFF に変換する CLI。
 
-セル中心で記録された座標を**半セルずらして**配置するため、出力が国土基本図の図郭境界にぴったり載る。格子に載っていない点群は**内挿せずエラーにする**。ファイル名が図郭番号なら、座標系も自動で判定する。
+セル中心で記録された座標を**半セルずらして**配置するため、出力が国土基本図の図郭境界にぴったり載る。格子に載っていない点群は**内挿せずエラーにする**。ファイル名が図郭番号なら、座標系も自動で判定する。大量の図郭は1枚に結合できる。
 
 ```console
-$ grid2geotiff convert data/raw -o data/out -j 4
-変換 4 ファイル -> data/out  (CRS は図郭番号から判定 / JGD2011)
+$ grid2geotiff convert testdata/yamanashi-kofu/raw -o testdata/yamanashi-kofu/out -j 4
+変換 4 ファイル -> testdata/yamanashi-kofu/out  (CRS は図郭番号から判定 / JGD2011)
   OK   08LE2134.txt  800x600 @ 0.5m  点 478,294  欠損 1,706 (0.36%)  CRS EPSG:6676（1/500 図郭番号から推定）  -> 08LE2134.tif
   OK   08LE2135.txt  800x600 @ 0.5m  点 480,000  欠損 0 (0.00%)  CRS EPSG:6676（1/500 図郭番号から推定）  -> 08LE2135.tif
   OK   08LE2144.txt  800x600 @ 0.5m  点 480,000  欠損 0 (0.00%)  CRS EPSG:6676（1/500 図郭番号から推定）  -> 08LE2144.tif
@@ -108,6 +108,12 @@ pip install -e .
 
 Python 3.10 以上。依存は rasterio / numpy / pandas / click のみで、GDAL の Python バインディングは不要。
 
+`merge --clip` でベクタファイルの範囲を使う場合だけ fiona が要る。
+
+```console
+pip install -e ".[clip]"
+```
+
 ## 使い方
 
 ### convert — GeoTIFF に変換する
@@ -129,7 +135,7 @@ grid2geotiff convert <入力...> -o <出力先> [--crs <EPSG>]
 | `--compress` | `deflate` | `deflate` / `lzw` / `zstd` / `none`（予測子2つき） |
 | `--blocksize` | `256` | タイル化のブロックサイズ |
 | `--delimiter` | 自動判定 | `space` / `comma` / `tab` / `semicolon` |
-| `--columns` | `0,1,2` | X,Y,Z の列番号（0 始まり） |
+| `--columns` | `0,1,2` | X,Y,Z の列番号（0 始まり）。4列以上のファイルにも使える |
 | `--input-nodata` | なし | 入力側の欠測値。複数指定可 |
 | `--tolerance-ratio` | `0.01` | 格子からのずれの許容量（格子間隔に対する比） |
 | `--min-fill-ratio` | `0.01` | セル数に対する点数の下限。下回れば格子とみなさない |
@@ -141,7 +147,7 @@ grid2geotiff convert <入力...> -o <出力先> [--crs <EPSG>]
 大量の図郭を変換する前に、格子間隔の食い違いや不規則点群の混入を洗い出す。
 
 ```console
-$ grid2geotiff inspect data/raw -j 4
+$ grid2geotiff inspect testdata/yamanashi-kofu/raw -j 4
 点検 4 ファイル
   OK   08LE2134.txt  800x600 @ 0.5m  点 478,294  欠損 1,706 (0.36%)  X 5600.00..6000.00 Y -37200.00..-36900.00  CRS EPSG:6676（1/500 図郭番号から推定）
   OK   08LE2135.txt  800x600 @ 0.5m  点 480,000  欠損 0 (0.00%)  X 6000.00..6400.00 Y -37200.00..-36900.00  CRS EPSG:6676（1/500 図郭番号から推定）
@@ -150,6 +156,61 @@ $ grid2geotiff inspect data/raw -j 4
 `convert` と同じ判定を行うので、大量に変換する前にどの CRS が埋め込まれるかを確認できる。点検では CRS を判定できなくても失敗にはせず、理由を添えて報告する。
 
 オプションは上の表のうち出力に関わらないもの（`--crs` / `--datum` / `--res` / `--delimiter` / `--columns` / `--input-nodata` / `--tolerance-ratio` / `--min-fill-ratio` / `-j`）がそのまま使える。
+
+### merge — 図郭を1枚に結合する
+
+```console
+$ grid2geotiff merge testdata/yamanashi-kofu/out -o mosaic.tif
+結合 6 ファイル -> mosaic.tif
+  OK   1,600x1,800 @ 0.5m  被覆率 100.00%  -> mosaic.tif
+```
+
+「マップタイル作成マニュアル 第1.0版」はこう書いている。
+
+> QGIS では、経験上、データファイル数が 100 を超えてくると動作が重くなることから、ある程度取り回しの良いサイズにラスタデータをマージし、マージされたラスタでエラーがないか確認するほうが効率がよい
+
+1/500 図郭は 400m × 300m なので、県域だと図郭が万単位になる。
+
+結合は **VRT を経由する**。VRT は実データを持たず「どのファイルのどこを、出力のどこに置くか」だけを記した XML なので、何千枚を並べてもメモリに載らない。GDAL の Python バインディングに依存しない方針を保つため、XML は自前で組み立てている。読み書きはブロック単位で流すので、**1600 × 1800 の結合で実測ピーク 0.5MB**（一括で持てば 11MB）。
+
+| オプション | 既定 | 説明 |
+|---|---|---|
+| `-o, --out` | 必須 | 出力ファイル |
+| `--nodata` | `-9999` | 出力の NoData 値。図郭間で不揃いでもこの値に統一する |
+| `--compress` | `deflate` | `deflate` / `lzw` / `zstd` / `none` |
+| `--blocksize` | `256` | タイル化のブロックサイズ |
+| `--bounds` | なし | 切り出す範囲 `xmin,ymin,xmax,ymax`。格子に合わせて外側へ丸める |
+| `--clip` | なし | 切り出す範囲をベクタファイルの範囲から取る（fiona が要る） |
+| `--min-coverage` | `0.05` | 出力セル数に対する入力の被覆率の下限 |
+| `--vrt-only` | off | GeoTIFF を書かず VRT だけを出力する |
+| `--overwrite` | off | 既存の出力を上書き |
+
+`--vrt-only` で出した VRT は QGIS がそのまま開ける。実体を作らないので一瞬で終わり、容量も食わない。
+
+#### 揃っていない入力は結合しない
+
+座標系・格子間隔・データ型に加えて、**格子の位相**を確かめる。
+
+```console
+$ grid2geotiff merge base.tif half.tif -o out.tif
+  NG   half.tif の格子が base.tif と噛み合わない（X 方向に 0.25 m ずれている）。
+       そのまま結合すると値がセル単位でずれる
+```
+
+ここを見ないと、半セルずれた図郭を VRT が黙って最近隣で丸め込む。**半セルずれはこのツールが最初に取り組んだ問題そのもの**なので、結合で作り直すわけにいかない。
+
+#### 離れた区画は弾く
+
+```console
+$ grid2geotiff merge testdata/yamanashi-kofu/out testdata/yamanashi-fujiyoshida/out -o out.tif
+  NG   入力が疎すぎる（45,600x41,400 = 1,887,840,000 セルに対して入力は 4,800,000 セル、
+       被覆率 0.25% < 許容 5.00%）。離れた区画が混ざっていないか確認する
+       （意図した結合なら --min-coverage で緩める）
+```
+
+別々の地域の図郭をまとめて指定すると、間を埋めるだけの巨大な空ラスタができる。静岡県の ALB 全 1,164 図郭（沿岸に散在）で試すと 213,925 × 117,770 = 251 億セル・被覆率 1.31% になり、通せば約 100GB のほぼ空のラスタができる。
+
+穴あきの結合そのものは通す。実測で被覆率 35.87%（静岡県の 1/5000 図郭ひとつ、54 枚）と 66.67%（山梨県、4 枚）のケースを確認済み。
 
 ## 入力形式
 
@@ -167,19 +228,26 @@ $ grid2geotiff inspect data/raw -j 4
 - NoData 既定 `-9999`（欠損セルに充填。マップタイル作成マニュアルの「ラスタ値は -9999 に統一」に準拠）
 - `AREA_OR_POINT=Area`、`GRID_CONVENTION` / `GRID_RESOLUTION` / `SOURCE_FILE` タグ
 
-## サンプルデータ
+## 検証用データ
 
-山梨県の点群データ（CC BY 4.0 / ODbL デュアルライセンス）で動作確認できる。
+動作確認には実データを使う。**リポジトリには含めない**（配布ライセンスと容量の都合）。出所・ライセンス・取得手順は [`testdata/README.md`](testdata/README.md) にまとめてある。
+
+| データ | ライセンス | 図郭 | 確認していること |
+|---|---|---:|---|
+| [山梨県 点群データ（航空LP・MMS）](https://www.geospatial.jp/ckan/dataset/yamanashi-pointcloud-2024) | CC BY 4.0 / ODbL デュアル | 10 | 半セルずらしの正しさ、図郭境界が隙間なく接続すること |
+| [VIRTUAL SHIZUOKA 静岡県 中西部沿岸 点群データ](https://www.geospatial.jp/ckan/dataset/shizuoka-2025-pointcloud-alb)（ALB） | CC BY 4.0 | 1,164 | 図郭番号の網羅、欠損の多い図郭、大量ファイルの処理 |
+
+山梨県は航空レーザ計測の標準的なグリッドデータで、図郭がほぼ完全に埋まっている（欠損 0〜1.76%）。静岡県の ALB（航空レーザ測深）は沿岸データなので性質が違い、1/50000 図郭の記号が 7 種類にわたるうえ、海域にかかって数パーセントしか埋まっていない図郭が多く混ざる。
 
 ```console
 pip install mapbox-vector-tile
-python scripts/fetch_yamanashi_sample.py --out data/raw
-grid2geotiff convert data/raw -o data/out -j 4
+python scripts/fetch_yamanashi_sample.py --out testdata/yamanashi-kofu/raw
+grid2geotiff convert testdata/yamanashi-kofu/raw -o testdata/yamanashi-kofu/out -j 4
 ```
 
 配布リソースの URL は `{z}/{x}/{y}.pbf` のベクトルタイルだが、これは実データではなく**ダウンロード用の索引**である。タイルのフィーチャ属性に図郭番号（`MESH_NO`）と ZIP の URL が入っており、スクリプトはそこから実ファイルを辿る。
 
-取得できるのは 1/500 図郭（400m × 300m）単位の 0.5m 格子で、1枚あたり 800 × 600 = 480,000 点。座標系は JGD2011 平面直角座標系第8系（EPSG:6676）で、図郭番号 `08LE2134` の先頭2桁から判定できるため `--crs` は要らない。
+自動テストはこれらのデータを使わず、同じ性質（セル中心座標・欠損セル・CRLF）を持つ合成データで完結する。実データは、合成データでは出ない食い違いを見つけるための手動検証に使う。
 
 ## 開発
 
@@ -189,7 +257,7 @@ pytest -q
 ruff check . && ruff format --check .
 ```
 
-テストは実データを使わず、同じ性質（セル中心座標・欠損セル・CRLF）を持つ合成データで検証する。ただし図郭番号から計算する範囲の期待値だけは、実データ4枚の座標範囲から採っている。
+テストは実データを使わず、同じ性質（セル中心座標・欠損セル・CRLF）を持つ合成データで検証する。ただし図郭番号から計算する範囲の期待値だけは、実データ4枚の座標範囲から採っている。実データでの確認手順は [`testdata/README.md`](testdata/README.md) にある。
 
 ## 参考資料
 
