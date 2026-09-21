@@ -11,7 +11,8 @@ from rasterio.crs import CRS
 from grid2geotiff.gridspec import GridSpec
 
 #: 圧縮方式ごとの既定オプション。標高のような連続値は予測子2が効く。
-_COMPRESS_OPTIONS = {
+#: merge も同じ設定で書き出すので公開しておく。
+COMPRESS_OPTIONS = {
     "deflate": {"compress": "deflate", "predictor": 2, "zlevel": 6},
     "lzw": {"compress": "lzw", "predictor": 2},
     "zstd": {"compress": "zstd", "predictor": 2, "zstd_level": 9},
@@ -48,9 +49,9 @@ def write_geotiff(
         raise ValueError(
             f"配列の形と格子定義が食い違う: {array.shape} != {(spec.height, spec.width)}"
         )
-    if compress not in _COMPRESS_OPTIONS:
+    if compress not in COMPRESS_OPTIONS:
         raise ValueError(
-            f"未知の圧縮方式 {compress!r}（{', '.join(_COMPRESS_OPTIONS)} のいずれか）"
+            f"未知の圧縮方式 {compress!r}（{', '.join(COMPRESS_OPTIONS)} のいずれか）"
         )
 
     profile = {
@@ -68,7 +69,7 @@ def write_geotiff(
     if tiled:
         profile["blockxsize"] = blocksize
         profile["blockysize"] = blocksize
-    profile.update(_COMPRESS_OPTIONS[compress])
+    profile.update(COMPRESS_OPTIONS[compress])
 
     tags = {
         "AREA_OR_POINT": "Area",
