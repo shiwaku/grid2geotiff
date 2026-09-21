@@ -218,10 +218,14 @@ def build_vrt(
         relative = "0"
         if vrt_dir is not None:
             try:
-                filename = os.path.relpath(s.path.resolve(), vrt_dir.resolve())
-                relative = "1"
-            except ValueError:  # 別ドライブなど相対化できない場合は絶対パス
-                pass
+                candidate = os.path.relpath(s.path.resolve(), vrt_dir.resolve())
+            except ValueError:  # 別ドライブなど相対化できない
+                candidate = None
+            # 相対パスは VRT を持ち運べるようにするためのもの。共通の親が遠いと
+            # `..` が延々と並んで絶対パスより長くなるので、そのときは素直に
+            # 絶対パスにする。
+            if candidate is not None and len(candidate) <= len(filename):
+                filename, relative = candidate, "1"
 
         nodata_tag = (
             f"\n      <NODATA>{s.nodata:.17g}</NODATA>" if s.nodata is not None else ""
@@ -295,6 +299,7 @@ class MergeResult:
     res_y: float
     nodata: float
     covered: int  # 入力が載るセル数
+    vrt: Path | None = None  # 残した VRT。残していなければ None
 
     @property
     def cells(self) -> int:
@@ -335,18 +340,29 @@ def merge_files(
     min_coverage: float = 0.05,
     overwrite: bool = False,
     vrt_only: bool = False,
+    keep_vrt: bool = False,
 ) -> MergeResult:
     """複数の GeoTIFF を1枚に結合する。
 
     VRT を介してブロック単位で読み書きするので、出力が何 GB になってもメモリには
     1ブロック分しか載らない。
 
+    Args:
+        vrt_only: GeoTIFF を書かず、`out_path` に VRT だけを書く。
+        keep_vrt: GeoTIFF に加えて、同じ場所に `.vrt` も残す。どの図郭をどう
+            並べた結合なのかがファイルとして残り、QGIS や GDAL から直接開ける。
+
     Raises:
         MergeError: 入力が揃っていない、または被覆率が下限を下回るとき。
     """
     out_path = Path(out_path)
-    if out_path.exists() and not overwrite:
-        raise MergeError(f"出力が既にある（--overwrite で上書き）: {out_path}")
+    # 残す VRT は GeoTIFF と同じ場所・同じ名前で拡張子だけ変える。
+    side_vrt = out_path.with_suffix(".vrt") if keep_vrt and not vrt_only else None
+
+    if not overwrite:
+        for p in (out_path, side_vrt):
+            if p is not None and p.exists():
+                raise MergeError(f"出力が既にある（--overwrite で上書き）: {p}")
 
     sources = read_sources(paths)
     check_compatible(sources)
@@ -384,14 +400,22 @@ def merge_files(
             f"（意図した結合なら --min-coverage で緩める）"
         )
 
-    vrt_dir = out_path.parent if vrt_only else None
-    vrt_xml = build_vrt(sources, extent, nodata=nodata, vrt_dir=vrt_dir)
-
     out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # 残す VRT はソースを相対パスで書く。GeoTIFF と一緒に持ち運べるように。
+    # 一時的に使うだけなら絶対パスでよい。
+    kept_vrt = out_path if vrt_only else side_vrt
+    vrt_xml = build_vrt(
+        sources,
+        extent,
+        nodata=nodata,
+        vrt_dir=kept_vrt.parent if kept_vrt is not None else None,
+    )
+
     if vrt_only:
         out_path.write_text(vrt_xml, encoding="utf-8")
     else:
-        _write_merged(vrt_xml, out_path, ref, nodata, compress, blocksize)
+        _write_merged(vrt_xml, out_path, side_vrt, ref, nodata, compress, blocksize)
 
     return MergeResult(
         output=out_path,
@@ -402,18 +426,24 @@ def merge_files(
         res_y=ref.res_y,
         nodata=nodata,
         covered=covered,
+        vrt=kept_vrt,
     )
 
 
 def _write_merged(
     vrt_xml: str,
     out_path: Path,
+    side_vrt: Path | None,
     ref: Source,
     nodata: float,
     compress: str,
     blocksize: int,
 ) -> None:
-    """VRT をブロック単位で読み出し、GeoTIFF に書き出す。"""
+    """VRT をブロック単位で読み出し、GeoTIFF に書き出す。
+
+    `side_vrt` を渡すとそこに VRT を残し、読み出しにもそれを使う。渡さなければ
+    一時ファイルに置いて最後に消す。
+    """
     from grid2geotiff.writer import COMPRESS_OPTIONS
 
     if compress not in COMPRESS_OPTIONS:
@@ -421,8 +451,7 @@ def _write_merged(
             f"未知の圧縮方式 {compress!r}（{', '.join(COMPRESS_OPTIONS)} のいずれか）"
         )
 
-    # VRT は一時ファイルに置く。相対パスを使わないので場所は問わない。
-    tmp = out_path.with_suffix(out_path.suffix + ".tmp.vrt")
+    tmp = side_vrt or out_path.with_suffix(out_path.suffix + ".tmp.vrt")
     tmp.write_text(vrt_xml, encoding="utf-8")
     try:
         with rasterio.open(tmp) as src:
@@ -454,4 +483,5 @@ def _write_merged(
                     GRID_RESOLUTION=f"{ref.res_x} x {ref.res_y}",
                 )
     finally:
-        tmp.unlink(missing_ok=True)
+        if side_vrt is None:
+            tmp.unlink(missing_ok=True)

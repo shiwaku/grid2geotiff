@@ -327,6 +327,11 @@ def _parse_bounds(value: str | None) -> tuple[float, float, float, float] | None
     is_flag=True,
     help="GeoTIFF を書かず VRT だけを出力する。QGIS はこれを直接開ける。",
 )
+@click.option(
+    "--keep-vrt",
+    is_flag=True,
+    help="GeoTIFF に加えて、同じ名前の .vrt も残す（どう結合したかの記録になる）。",
+)
 @click.option("--overwrite", is_flag=True, help="既存の出力を上書きする。")
 def merge(
     inputs,
@@ -338,6 +343,7 @@ def merge(
     clip,
     min_coverage,
     vrt_only,
+    keep_vrt,
     overwrite,
 ) -> None:
     """図郭ごとの GeoTIFF を1枚に結合する。
@@ -376,14 +382,18 @@ def merge(
             min_coverage=min_coverage,
             overwrite=overwrite,
             vrt_only=vrt_only,
+            keep_vrt=keep_vrt,
         )
     except MergeError as exc:
         click.secho(f"  NG   {exc}", fg="red", err=True)
         sys.exit(1)
 
+    outputs = result.output.name
+    if result.vrt is not None and result.vrt != result.output:
+        outputs += f" + {result.vrt.name}"
     click.echo(
         f"  OK   {result.width:,}x{result.height:,} @ {result.res_x:g}m  "
-        f"被覆率 {result.coverage:.2%}  -> {result.output.name}"
+        f"被覆率 {result.coverage:.2%}  -> {outputs}"
     )
 
 
