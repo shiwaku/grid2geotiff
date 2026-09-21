@@ -120,12 +120,15 @@ def read_xyz(
 
     with open_xyz_stream(path) as stream:
         try:
+            # 列名は付けない。`header=None` なら pandas が 0 始まりの整数を
+            # 列ラベルにするので、`usecols` で選んだ列を元の位置で取り出せる。
+            # 自前で名前を作ると、ファイルの列数と数が合ったときしか通らない
+            # （4列目以降に付帯情報が並ぶ配布形態がある）。
             frame = pd.read_csv(
                 stream,
                 sep=sep,
                 header=None,
                 usecols=usecols,
-                names=[f"c{i}" for i in range(max(columns) + 1)],
                 dtype="float64",
                 comment="#",
                 skip_blank_lines=True,
@@ -138,9 +141,9 @@ def read_xyz(
     if frame.empty:
         raise XyzReadError(f"{path.name}: 点が1つもない")
 
-    x = frame[f"c{columns[0]}"].to_numpy(dtype="float64", copy=False)
-    y = frame[f"c{columns[1]}"].to_numpy(dtype="float64", copy=False)
-    z = frame[f"c{columns[2]}"].to_numpy(dtype="float64", copy=False)
+    x = frame[columns[0]].to_numpy(dtype="float64", copy=False)
+    y = frame[columns[1]].to_numpy(dtype="float64", copy=False)
+    z = frame[columns[2]].to_numpy(dtype="float64", copy=False)
 
     keep = np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
     for sentinel in input_nodata:
