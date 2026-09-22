@@ -21,6 +21,7 @@ maptiles_manual.txt
 /testdata/*
 !/testdata/README.md
 !/testdata/urllist-shizuoka-alb.txt
+!/testdata/candidates.md
 
 # 参考資料（第三者著作物のため同梱しない）
 references/
