@@ -11,6 +11,7 @@ import click
 from grid2geotiff import __version__
 from grid2geotiff.convert import ConvertOptions, ConvertResult, convert_file, inspect_file
 from grid2geotiff.merge import MergeError, merge_files, read_clip_bounds
+from grid2geotiff.spec import SpecResult, check_file
 
 #: ZIP も含めて入力として受け付ける拡張子。
 INPUT_SUFFIXES = (".txt", ".csv", ".xyz", ".dat", ".zip")
@@ -395,6 +396,66 @@ def merge(
         f"  OK   {result.width:,}x{result.height:,} @ {result.res_x:g}m  "
         f"被覆率 {result.coverage:.2%}  -> {outputs}"
     )
+
+
+@main.command()
+@click.argument("inputs", nargs=-1, required=True, type=click.Path(exists=True))
+@click.option("--verbose", "-v", is_flag=True, help="適合した条項も1行ずつ出す。")
+@click.option("--jobs", "-j", default=1, show_default=True, help="並列処理数。")
+def validate(inputs, verbose, jobs) -> None:
+    """GeoTIFF が標準仕様に適合しているかを点検する。
+
+    自分が変換したものだけでなく、受け取った GeoTIFF の点検にも使える。「貸与された
+    データからいきなりマップタイルを作成すると…異常に事前に気づくことができず、出戻り
+    作業が発生する」（マップタイル作成マニュアル 第1.0版）。
+
+    仕様書が「〜とする」と定める条項に反すれば NG、「基本とする」「標準とする」の幅から
+    外れるだけなら 注意 として報告する。
+    """
+    files = _expand_inputs(inputs, RASTER_SUFFIXES)
+    if not files:
+        raise click.ClickException("入力ファイルが見つからない")
+
+    click.echo(f"仕様適合点検 {len(files)} ファイル")
+    if jobs <= 1 or len(files) <= 1:
+        results = [check_file(p) for p in files]
+    else:
+        done: dict[Path, SpecResult] = {}
+        with ProcessPoolExecutor(max_workers=jobs) as pool:
+            futures = {pool.submit(check_file, p): p for p in files}
+            for future in as_completed(futures):
+                done[futures[future]] = future.result()
+        results = [done[p] for p in files]
+
+    ng_files = 0
+    warn_files = 0
+    for r in results:
+        if r.error:
+            ng_files += 1
+            click.secho(f"  NG   {r.path.name}  {r.error}", fg="red", err=True)
+            continue
+        if r.ng:
+            ng_files += 1
+            click.secho(f"  NG   {r.path.name}", fg="red", err=True)
+        elif r.warn:
+            warn_files += 1
+            click.secho(f"  注意 {r.path.name}", fg="yellow")
+        else:
+            click.echo(f"  OK   {r.path.name}")
+        for c in r.checks:
+            if c.level == "OK" and not verbose:
+                continue
+            mark = {"NG": "NG  ", "注意": "注意", "OK": "OK  "}[c.level]
+            click.echo(f"       {mark} {c.item}: {c.detail}")
+            if c.level != "OK":
+                click.echo(f"            根拠 {c.source}")
+
+    ok_files = len(results) - ng_files - warn_files
+    click.echo(
+        f"\n仕様適合点検: 適合 {ok_files} / 注意 {warn_files} / 不適合 {ng_files}"
+        f" / 計 {len(results)}"
+    )
+    sys.exit(1 if ng_files else 0)
 
 
 if __name__ == "__main__":
