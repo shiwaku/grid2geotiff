@@ -121,3 +121,29 @@ def test_inspectも判定したcrsを表示する(tmp_path, xyz_file):
     result = CliRunner().invoke(main, ["inspect", str(src)])
     assert result.exit_code == 0, result.output
     assert "EPSG:6676" in result.output
+
+
+def test_validateで変換結果が仕様に適合する(tmp_path, xyz_file):
+    """変換したものをそのまま点検すれば適合するはず。"""
+    src = xyz_file(name="08LE2134.txt", drop=0)
+    out = tmp_path / "out"
+    CliRunner().invoke(main, ["convert", str(src), "-o", str(out), "--crs", "EPSG:6676"])
+
+    result = CliRunner().invoke(main, ["validate", str(out), "-v"])
+    assert result.exit_code == 0, result.output
+    assert "不適合 0" in result.output
+    assert "図郭: 1/500 の格子に載る" in result.output
+
+
+def test_validateは仕様から外れた出力を不適合にする(tmp_path, xyz_file):
+    """--nodata を既定から変えると、マップタイル作成マニュアルの統一方針に反する。"""
+    src = xyz_file(name="08LE2134.txt", drop=0)
+    out = tmp_path / "out"
+    CliRunner().invoke(
+        main,
+        ["convert", str(src), "-o", str(out), "--crs", "EPSG:6676", "--nodata", "-32768"],
+    )
+
+    result = CliRunner().invoke(main, ["validate", str(out)])
+    assert result.exit_code == 1
+    assert "不適合 1" in result.output
