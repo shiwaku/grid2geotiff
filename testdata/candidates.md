@@ -63,19 +63,26 @@ DEM / DSM1 / DSM2 の3系統があり、**同じ図郭で由来の違う3種類�
 
 ### 静岡県（VIRTUAL SHIZUOKA）
 
-| データセット | 対象範囲 | グリッド | 格子 | ライセンス |
-|---|---|---|---|---|
-| [中・西部](https://www.geospatial.jp/ckan/dataset/virtual-shizuoka-mw) | 県中部・西部 | LP 0.5m | **確認済**（800×600、H: に 34,439 図郭 292GiB） | ODbL |
-| [中西部沿岸](https://www.geospatial.jp/ckan/dataset/shizuoka-2025-pointcloud-alb) | 中西部の沿岸（ALB） | ALB 0.5m | **確認済**（`testdata/shizuoka-alb` 1,164 図郭） | CC BY |
-| [富士山および静岡東部](https://www.geospatial.jp/ckan/dataset/shizuoka-2021-pointcloud) | 富士山・県東部 | LP 0.5m / ALB 0.5m | **確認済**（H: に 7,987 図郭、空白区切り3列） | CC BY |
-| [富士山南東部・伊豆東部](https://www.geospatial.jp/ckan/dataset/shizuoka-2019-pointcloud) | 富士山南東部・伊豆東部 | LP 0.5m / ALB 0.5m | 未確認（E: に1図郭のみ） | CC BY |
-| [伊豆西部](https://www.geospatial.jp/ckan/dataset/shizuoka-2020-pointcloud) | 伊豆西部 | LP 0.5m / ALB 0.5m | 未確認 | CC BY |
-| [北西部](https://www.geospatial.jp/ckan/dataset/shizuoka-2025-pointcloud) | 県北西部 | LP 0.5m | 未確認（索引 URL が未設定） | CC BY |
-| [北部（南アルプス）](https://www.geospatial.jp/ckan/dataset/shizuoka-2022-pointcloud) | 南アルプス | LP 0.5m | 未確認 | CC BY |
+| データセット | 対象範囲 | グリッド | 形式 | 格子 | ライセンス |
+|---|---|---|---|---|---|
+| [中・西部](https://www.geospatial.jp/ckan/dataset/virtual-shizuoka-mw) | 県中部・西部 | LP 0.5m | ZIP（**無圧縮**）+ txt、5列カンマ区切り | **確認済**（800×600、H: に 34,439 図郭 292GiB） | ODbL |
+| [中西部沿岸](https://www.geospatial.jp/ckan/dataset/shizuoka-2025-pointcloud-alb) | 中西部の沿岸（ALB） | ALB 0.5m | ZIP（deflate）+ txt、5列カンマ区切り | **確認済**（`testdata/shizuoka-alb` 1,164 図郭） | CC BY |
+| [富士山および静岡東部](https://www.geospatial.jp/ckan/dataset/shizuoka-2021-pointcloud) | 富士山・県東部 | LP 0.5m / ALB 0.5m | ZIP（deflate）+ txt、**空白区切り3列** | **確認済**（778×600、H: に 7,987 図郭） | CC BY |
+| [富士山南東部・伊豆東部](https://www.geospatial.jp/ckan/dataset/shizuoka-2019-pointcloud) | 富士山南東部・伊豆東部 | LP 0.5m / ALB 0.5m | ZIP（deflate）+ txt、**空白区切り3列** | **確認済**（800×600、E: に1図郭） | CC BY |
+| [伊豆西部](https://www.geospatial.jp/ckan/dataset/shizuoka-2020-pointcloud) | 伊豆西部 | LP 0.5m / ALB 0.5m | 不明 | 未確認 | CC BY |
+| [北西部](https://www.geospatial.jp/ckan/dataset/shizuoka-2025-pointcloud) | 県北西部 | LP 0.5m | 不明 | 未確認（索引 URL が未設定） | CC BY |
+| [北部（南アルプス）](https://www.geospatial.jp/ckan/dataset/shizuoka-2022-pointcloud) | 南アルプス | LP 0.5m | 不明 | 未確認 | CC BY |
 
-- CRS: JGD2011 平面直角座標系第8系（中西部沿岸のみ **JGD2024**）、図郭単位
+- CRS: JGD2011 平面直角座標系第8系（中西部沿岸のみ **JGD2024**）、1/500 図郭単位（800×600 セル）
 - ホスト: `https://gic-shizuoka.s3.ap-northeast-1.amazonaws.com/`
-- 中・西部の列構成は5列カンマ区切りで `--columns 1,2,3` が要る（`testdata/README.md` 参照）
+
+**形式は同じ静岡県内でも揃っていない。** 中部・西部と中西部沿岸は5列カンマ区切りで `--columns 1,2,3`
+が要る（`testdata/README.md` 参照）のに対し、富士山まわりの2件は `X Y Z` の空白区切り3列で
+オプションなしに通る。ZIP の圧縮方法も中・西部だけ**無圧縮**（stored）で、他は deflate である。
+
+「不明」の3件はグリッドのリソースが索引タイル（PBF）しか公開しておらず、実ファイルを
+辿らないと形式が分からない。上4件の実績からは ZIP + txt と見込まれるが、区切り文字と列数は
+取ってみるまで確定できない。
 
 **中西部沿岸だけ測地系が JGD2024** と書かれており、他と混ぜて結合できない可能性がある。
 
@@ -93,7 +100,7 @@ DEM / DSM1 / DSM2 の3系統があり、**同じ図郭で由来の違う3種類�
 - ライセンス: CC BY、ホスト `https://gic-kanagawa.s3.ap-northeast-1.amazonaws.com/`
 - **格子: 全件未確認**（手元に1ファイルも無い）
 
-**他県に無い性質を2つ持つ。**
+**他県に無い性質を3つ持つ。**
 
 1. **1m 格子**がある（令和4年度）。手元の検証データは 0.5m と 0.25m だけなので、格子間隔の推定を別の値で試せる
 2. **CSV 形式**を明示している。区切り文字の自動判定と `--columns` の検証に使える
@@ -117,10 +124,10 @@ DEM / DSM1 / DSM2 の3系統があり、**同じ図郭で由来の違う3種類�
 1. **神奈川県 令和4年度** — 1m 格子・CSV・DCHM/DSM と、手元に無い性質が3つある
 2. **熱海（エアロトヨタ）** — 43MB の直リンクで、索引タイルを辿らずに試せる
 3. **新潟県村上市（エアロトヨタ）** — `GRD` 形式が XYZ テキストかどうかの確認
-4. 静岡県の未取得分（伊豆西部・北西部・南アルプス） — 既確認分と同形式の見込みで、優先度は低い
+4. 静岡県の未取得分（伊豆西部・北西部・南アルプス） — 既確認分と同形式の見込みだが、区切り文字は確定できていない
 
 ## 注意
 
 この表の「格子間隔」「対象範囲」はカタログの記載をそのまま写したもので、**実物で検算したのは
-「確認済」と書いた4件だけ**である。ダウンロードの際は各データセットの利用規約を確認すること
+「確認済」と書いた5件だけ**である。ダウンロードの際は各データセットの利用規約を確認すること
 （村上市のみ独自利用規約）。
