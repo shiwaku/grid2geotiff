@@ -23,12 +23,23 @@ JGD2011 の平面直角座標系は EPSG:6669（第1系）から連番なので�
   （南北 30km × 東西 40km）。左上を A として南北・東西の順に記号を付す。
 - 1/5000 図郭 …… 1/50000 を縦横 10 等分（3km × 4km）。2桁の数字（行, 列）。
 - 1/2500 図郭 …… 1/5000 を 4 等分（1.5km × 2km）。1桁の数字（1〜4）。
+- 1/2500 の4分割 …… 1/2500 をさらに 4 等分（750m × 1000m）。1桁の数字（1〜4）。
 - 1/1000 図郭 …… 1/5000 を縦横 5 等分（600m × 800m）。2桁の数字（行, 列、各 0〜4）。
 - 1/500 図郭 …… 1/5000 を縦横 10 等分（300m × 400m）。2桁の数字（行, 列）。
 
 1/50000 の割り方と 1/5000 の行列の読み方は「森林情報に関するオープンデータ標準仕様書
 Ver2.1」参考3（20m メッシュ ID の付与規則）で確認した。1/500 は山梨県の実データ4枚で
 検算済み。
+
+**1/2500 が基準である。** 国土地理院「航空レーザ測量による数値標高モデル（DEM）作成
+マニュアル（案）」第2条は「各系の原点を基準に、南北 1.5km、東西 2.0km の区画に区分」した
+ものを国土基本図図郭と呼び、「データ区分は、国土基本図単位を基本とする」と定める。
+
+**1/2500 の4分割も実務の単位である。** 林野庁「マップタイル作成マニュアル 第1.0版」は
+「ラスタデータにあっては国土基本図図郭（2,500 やその４分の１）…を単位として作成される
+ことが多い」と書く。準則に載る呼称ではないので、地図情報レベルを当てずに「1/2500 の
+4分割」と呼ぶ。広島県の航空レーザ計測データ（2000×1483 @0.5m = 1000m × 741m）が
+これにあたる。
 
 ## 受け付ける範囲
 
@@ -43,11 +54,17 @@ Ver2.1」参考3（20m メッシュ ID の付与規則）で確認した。1/500
 これはオープンデータ標準仕様書がラスタや GeoPackage の配布単位として定めたもので、XYZ
 テキストの単位ではない（0.5m 格子なら 12 億点になる）。
 
-## 1/1000 と 1/500 の見分け方
+## 数字2桁の読み方が3通りある
 
-どちらも 1/5000 コードの後ろに数字2桁が付くため、`08LE2134` はどちらとも読める。そこで
-両方を候補として範囲を計算し、**実際の座標が収まる方を採る**。系番号は先頭2桁からしか
-決まらないので、どちらに転んでも CRS は同じであり、判定を外しても実害がない。
+1/5000 コードの後ろに付く数字2桁は、次の3通りに読める。`08LE2134` はどれとも読める。
+
+- 1/500 の（行, 列）…… 300m × 400m
+- 1/1000 の（行, 列）…… 600m × 800m（各桁 0〜4 のときのみ）
+- 1/2500 の番号 + その4分割の番号 …… 750m × 1000m（各桁 1〜4 のときのみ）
+
+そこで全部を候補として範囲を計算し、**実際の座標が収まるものを細かい方から採る**。大きさが
+3通りとも違うので、座標の範囲を見れば一意に決まる。系番号は先頭2桁からしか決まらないので、
+どれに転んでも CRS は同じであり、判定を外しても実害がない。
 """
 
 from __future__ import annotations
@@ -97,11 +114,12 @@ def _rect(
 class Figure:
     """図郭番号が指しうる1つの解釈。"""
 
-    level: int  # 地図情報レベル（5000 / 2500 / 1000 / 500）
+    #: 表示用の呼称（`1/500` / `1/2500 の4分割` など）。1/2500 の4分割は準則に載る
+    #: 地図情報レベルを持たないので、数値ではなく呼称で持つ。
+    name: str
     extent: tuple[float, float, float, float]
 
-    #: 検算に使う範囲。通常は `extent` と同じだが、番号の並びを確認できていない
-    #: 階層では親の図郭を入れて、推測違いで正しいデータを弾かないようにする。
+    #: 検算に使う範囲。通常は `extent` と同じ。
     check_extent: tuple[float, float, float, float]
 
     def contains(
@@ -178,30 +196,40 @@ def parse(name: str) -> Zukaku:
     rest = digits[2:]
     candidates: list[Figure] = []
 
+    def quarter(
+        top: float, left: float, ns: float, ew: float, number: int
+    ) -> tuple[float, float]:
+        """4等分した区画の北西角を返す。並びは 1=北西, 2=北東, 3=南西, 4=南東。
+
+        この並びは仕様書の図版でしか示されていないが、広島県の航空レーザ計測データ
+        300 図郭で、計算した範囲に実際の座標が収まることを確かめてある。
+        """
+        return top - ns / 2 * ((number - 1) // 2), left + ew / 2 * ((number - 1) % 2)
+
     if not rest:
-        candidates.append(Figure(5_000, base, base))
+        candidates.append(Figure("1/5000", base, base))
 
     elif len(rest) == 1:  # 1/2500。1/5000 を 4 等分。
-        quadrant = int(rest)
-        if not 1 <= quadrant <= 4:
-            raise ZukakuError(f"1/2500 図郭の番号が範囲外: {quadrant}（1〜4）")
-        qns, qew = ns / 2, ew / 2
-        extent = _rect(
-            top - qns * ((quadrant - 1) // 2), left + qew * ((quadrant - 1) % 2), qns, qew
-        )
-        # 1〜4 の並び（1=北西, 2=北東, 3=南西, 4=南東）は仕様書の図版でしか示されて
-        # おらず裏が取れていないため、検算は親の 1/5000 図郭で行う。並びを誤って
-        # 推測しても、正しいデータを弾かずに済む。
-        candidates.append(Figure(2_500, extent, base))
+        number = int(rest)
+        if not 1 <= number <= 4:
+            raise ZukakuError(f"1/2500 図郭の番号が範囲外: {number}（1〜4）")
+        qtop, qleft = quarter(top, left, ns, ew, number)
+        extent = _rect(qtop, qleft, ns / 2, ew / 2)
+        candidates.append(Figure("1/2500", extent, extent))
 
-    else:  # 数字2桁。1/500 と 1/1000 のどちらもありうる。
+    else:  # 数字2桁。読み方が3通りある。細かい方から候補に入れる。
         row, col = int(rest[0]), int(rest[1])
         sns, sew = ns / 10, ew / 10  # 1/500: 300m × 400m
         extent = _rect(top - sns * row, left + sew * col, sns, sew)
-        candidates.append(Figure(500, extent, extent))
+        candidates.append(Figure("1/500", extent, extent))
         if row <= 4 and col <= 4:  # 1/1000 は縦横 5 等分なので各桁 0〜4
             kns, kew = ns / 5, ew / 5  # 600m × 800m
             extent = _rect(top - kns * row, left + kew * col, kns, kew)
-            candidates.append(Figure(1_000, extent, extent))
+            candidates.append(Figure("1/1000", extent, extent))
+        if 1 <= row <= 4 and 1 <= col <= 4:  # 1/2500 の番号 + その4分割の番号
+            qtop, qleft = quarter(top, left, ns, ew, row)
+            htop, hleft = quarter(qtop, qleft, ns / 2, ew / 2, col)
+            extent = _rect(htop, hleft, ns / 4, ew / 4)  # 750m × 1000m
+            candidates.append(Figure("1/2500 の4分割", extent, extent))
 
     return Zukaku(code=m.group(0), system=system, candidates=tuple(candidates))

@@ -27,7 +27,7 @@ def test_実データの図郭番号から範囲を再現できる(code, extent)
     assert z.epsg() == "EPSG:6676"
     figure = z.match(extent, slack=0.5)
     assert figure is not None
-    assert figure.level == 500
+    assert figure.name == "1/500"
     assert figure.extent == extent
 
 
@@ -46,7 +46,7 @@ def test_測地系でEPSGが変わる():
 
 def test_1_5000図郭():
     (figure,) = parse("08LE21").candidates
-    assert figure.level == 5_000
+    assert figure.name == "1/5000"
     assert figure.extent == (4_000.0, -39_000.0, 8_000.0, -36_000.0)
 
 
@@ -59,48 +59,76 @@ def test_1_5000図郭():
 )
 def test_1_2500図郭(code, extent):
     (figure,) = parse(code).candidates
-    assert figure.level == 2_500
+    assert figure.name == "1/2500"
     assert figure.extent == extent
 
 
-def test_1_2500の検算は親の1_5000図郭で行う():
-    """1〜4 の並びは仕様書の図版でしか示されておらず裏が取れていない。
+def test_1_2500は自分の範囲で検算する():
+    """1〜4 の並びは広島県の実データ 300 図郭で確かめてある。
 
-    推測を誤っても正しいデータを弾かないよう、検算は親の 1/5000 図郭で行う。
+    かつては並びの裏が取れず親の 1/5000 図郭で検算していたが、実データで確認できた
+    ので自分の範囲で見る。別の象限に載るデータは弾く。
     """
     (figure,) = parse("08LE211").candidates
-    assert figure.check_extent == parse("08LE21").candidates[0].extent
-    # 別の象限に載るデータでも、親の 1/5000 に収まっていれば通す。
-    assert figure.contains((6_100.0, -38_900.0, 6_200.0, -38_800.0), slack=0.5)
+    assert figure.check_extent == figure.extent
+    assert not figure.contains((6_100.0, -38_900.0, 6_200.0, -38_800.0), slack=0.5)
 
 
-# --- 1/1000 と 1/500 の見分け ------------------------------------------------
+# --- 数字2桁の3通りの読み方 --------------------------------------------------
 
 
 def test_数字2桁は1_500と1_1000の両方を候補にする():
-    levels = [f.level for f in parse("08LE2100").candidates]
-    assert levels == [500, 1_000]  # 細かい方が先
+    names = [f.name for f in parse("08LE2100").candidates]
+    assert names == ["1/500", "1/1000"]  # 細かい方が先
+
+
+def test_各桁が1から4なら1_2500の4分割も候補になる():
+    """林野庁のマップタイル作成マニュアルが実務単位として挙げる 750m × 1000m。"""
+    names = [f.name for f in parse("08LE2122").candidates]
+    assert names == ["1/500", "1/1000", "1/2500 の4分割"]  # 細かい方が先
+
+
+def test_0を含む数字2桁は1_2500の4分割になりえない():
+    """1/2500 とその4分割の番号は 1〜4 で、0 は使わない。"""
+    names = [f.name for f in parse("08LE2100").candidates]
+    assert "1/2500 の4分割" not in names
 
 
 def test_各桁が5以上なら1_1000はありえない():
     """1/1000 は 1/5000 を縦横 5 等分するので、各桁は 0〜4 にしかならない。"""
-    levels = [f.level for f in parse("08LE2155").candidates]
-    assert levels == [500]
+    names = [f.name for f in parse("08LE2155").candidates]
+    assert names == ["1/500"]
 
 
 @pytest.mark.parametrize(
-    ("extent", "level"),
+    ("code", "extent", "name"),
     [
-        ((4_000.0, -36_300.0, 4_400.0, -36_000.0), 500),  # 400m × 300m
-        ((4_000.0, -36_600.0, 4_800.0, -36_000.0), 1_000),  # 800m × 600m
+        ("08LE2100", (4_000.0, -36_300.0, 4_400.0, -36_000.0), "1/500"),  # 400m × 300m
+        ("08LE2100", (4_000.0, -36_600.0, 4_800.0, -36_000.0), "1/1000"),  # 800m × 600m
+        # 750m × 1000m。1/500 にも 1/1000 にも収まらないので4分割と判る。
+        ("08LE2122", (7_000.0, -36_750.0, 8_000.0, -36_000.0), "1/2500 の4分割"),
     ],
 )
-def test_座標が収まる方の図郭を選ぶ(extent, level):
-    """1/1000 と 1/500 は名前の形が同じなので、範囲で見分ける。"""
-    figure = parse("08LE2100").match(extent, slack=0.5)
+def test_座標が収まる図郭を選ぶ(code, extent, name):
+    """数字2桁は読み方が3通りあるので、範囲で見分ける。"""
+    figure = parse(code).match(extent, slack=0.5)
     assert figure is not None
-    assert figure.level == level
+    assert figure.name == name
     assert figure.extent == extent
+
+
+def test_広島県の実データの図郭番号から範囲を再現できる():
+    """1/2500 の4分割で配布されている実例。
+
+    ファイル名は `03od7922_14_05mcsv` で、末尾は整備年度と格子間隔。座標範囲は
+    grid2geotiff inspect の実測値（2000x1483 @0.5m）。
+    """
+    z = parse("03OD7922")
+    assert z.epsg() == "EPSG:6671"  # 第3系
+    figure = z.match((-1_000.0, -141_750.0, 0.0, -141_008.5), slack=0.5)
+    assert figure is not None
+    assert figure.name == "1/2500 の4分割"
+    assert figure.extent == (-1_000.0, -141_750.0, 0.0, -141_000.0)
 
 
 def test_どちらの候補にも収まらなければNone():
