@@ -176,7 +176,7 @@ ruff check . && ruff format --check .
 
 - [森林GISフォーラム 標準仕様分科会](https://fgis.jp/cloud) — 森林資源データ解析・管理標準仕様書 Ver3.1、森林情報に関するオープンデータ標準仕様書 Ver2.1
 - [マップタイル作成マニュアル 第1.0版](https://forestgeo.info/250510_manual_maptiles_1.0.pdf)（室木直樹＠林野庁、CC BY 4.0）
-- [作業規程の準則 航空レーザ測量編](https://www.gsi.go.jp/common/000258818.pdf)（国土地理院）
+- [航空レーザ測量による数値標高モデル（ＤＥＭ）作成マニュアル（案）](https://www.gsi.go.jp/common/000258818.pdf)（国土地理院技術資料 A1、平成18年4月）
 
 ## ライセンス
 
