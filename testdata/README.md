@@ -11,8 +11,12 @@
 | `yamanashi-kofu/` | [山梨県 点群データ（航空LP・MMS）](https://www.geospatial.jp/ckan/dataset/yamanashi-pointcloud-2024) | CC BY 4.0 / ODbL デュアル | 6 | 0.5m | 連続した図郭。変換とマージの基本確認 |
 | `yamanashi-fujiyoshida/` | 同上 | 同上 | 4 | 0.5m | 離れた区画。マージの被覆率判定 |
 | `shizuoka-alb/` | [VIRTUAL SHIZUOKA 静岡県 中西部沿岸 点群データ](https://www.geospatial.jp/ckan/dataset/shizuoka-2025-pointcloud-alb) | CC BY 4.0 | 1,164 | 0.5m | 図郭番号の網羅、欠損の多い図郭、大量ファイル |
+| `yamanashi-dem/` | 山梨県（同上） | 同上 | 37,929 | 0.5m | **県全域。配布元の GeoTIFF を正解データとして照合する** |
 
 各ディレクトリの `raw/` が入力（XYZ テキストまたはそれを含む ZIP）、`out/` が `convert` の出力。
+`yamanashi-dem/` だけは `truth/` に配布元の GeoTIFF を置く。
+
+検証対象をどう選んだかは [`candidates.md`](candidates.md) にある。
 
 ## 取得方法
 
@@ -30,6 +34,29 @@ python scripts/fetch_yamanashi_sample.py --out testdata/yamanashi-kofu/raw --lim
 python scripts/fetch_yamanashi_sample.py --out testdata/yamanashi-fujiyoshida/raw \
     --lat 35.4873 --lon 138.8078 --limit 4
 ```
+
+### 山梨県 全県（DEM グリッドデータ、正解データつき）
+
+**山梨県は同じ図郭の同じ格子を txt と GeoTIFF の両方で配布している。** これを使うと、変換結果を配布元の成果物とピクセル単位で照合できる。18 データセットを調べたなかで、この条件を満たすのは山梨県だけだった（[`candidates.md`](candidates.md) 参照）。
+
+URL は図郭番号から機械的に決まるので、索引タイルを毎回舐める必要がない。
+
+```
+.../Yamanashi/2024/03/LP/Grid/TXT/08/LE/21/08LE2134.zip
+.../Yamanashi/2024/03/LP/Grid/TIFF/08/LE/21/08LE2134.zip
+                              ~~~~ ~~ ~~ ~~ ~~~~~~~~
+                              形式 系 記号 上2桁 図郭番号
+```
+
+図郭番号の一覧 `meshlist-yamanashi-dem.txt`（37,929 件）だけを追跡し、実ファイルは含めない。一覧は索引タイル（z=12 で 169 枚）を走査して作った。
+
+```console
+python scripts/fetch_yamanashi_dem.py --out testdata/yamanashi-dem -j 4
+```
+
+`raw/` に txt の ZIP（約 80GiB）、`truth/` に GeoTIFF の ZIP（約 33GiB）が入る。`.part` に書いてから改名するので、途中で止めても再開できる。
+
+**索引の `MESH_NO` 属性は当てにしない。** 1件だけ属性に URL 文字列が入っているものがあり、図郭番号として読めない。一覧は URL のファイル名から図郭番号を取って作ってある。
 
 ### 静岡県（ALB グリッドデータ）
 
@@ -74,6 +101,22 @@ grid2geotiff convert testdata/shizuoka-alb/raw -o testdata/shizuoka-alb/out \
 - **図郭番号が広く散る。** 1/50000 図郭の記号が ND / NE / OB / OC / OD / PC / PD の7種類にわたる（山梨は LE の1種類のみ）。図郭番号から座標系と範囲を求める処理の網羅確認になる。
 - **図郭ごとの被覆率が大きく振れる。** ZIP が 0.02MB から 1.55MB まであり、海域にかかって数パーセントしか埋まっていない図郭が多く混ざる。欠損の多い入力を弾かずに通せるかの確認になる。
 - **ファイル数が桁違い。** 1,164 図郭は、マージの動機（QGIS がファイル数 100 超で重くなる）が実際に効く規模。
+
+## 正解データとの照合
+
+配布元の GeoTIFF と変換結果を突き合わせる。
+
+```console
+grid2geotiff convert testdata/yamanashi-dem/raw -o testdata/yamanashi-dem/out -j 8
+python scripts/compare_with_truth.py --out testdata/yamanashi-dem/out \
+    --truth testdata/yamanashi-dem/truth -j 8
+```
+
+見るのは4点。**ジオリファレンス**（大きさ・transform・CRS）、**欠損の位置**、**画素値**、**差の分布**。半セルずらしを誤れば transform の原点が 0.25m ずれるので、1点目で露見する。
+
+正解データは ZIP のまま読む（GDAL の `zip://`）ので、33GiB を展開せずに済む。
+
+**NoData 値は一致しなくてよい。** 本ツールは -9999 に統一するが、山梨県の GeoTIFF は float32 の最大値に近い値（1.7014e38）を使っている。照合では値そのものではなく**欠損とするセルの集合**が一致するかを見る。
 
 ## 実データで確認できたこと
 
